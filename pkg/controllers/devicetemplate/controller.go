@@ -40,7 +40,6 @@ func (c *Controller) OnChanged(key string, obj *v1alpha1.DeviceTemplate) (*v1alp
 	if obj == nil || obj.DeletionTimestamp != nil {
 		return nil, nil
 	}
-
 	objCopy := obj.DeepCopy()
 	objCopy.Status.UpdatedAt = metav1.Time{Time: time.Now()}
 	return c.dtController.Update(objCopy)
