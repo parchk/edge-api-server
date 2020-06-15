@@ -38,13 +38,13 @@ func (s *Server) Setup(ctx context.Context, server *steveserver.Server) error {
 		logrus.Fatalf("Error building controllers: %s", err.Error())
 	}
 	store = &Store{
-		Store:                            store,
-		asl:                              s.asl,
-		ctx:                              s.ctx,
-		client:                           server.ClientFactory.DynamicClient(),
-		auth:                             s.Authenticator,
-		deviceTemplateController:         controllers.Edgeapi().V1alpha1().DeviceTemplate(),
-		deviceTemplateRevisionController: controllers.Edgeapi().V1alpha1().DeviceTemplateRevision(),
+		Store:                    store,
+		asl:                      s.asl,
+		ctx:                      s.ctx,
+		client:                   server.ClientFactory.DynamicClient(),
+		auth:                     s.Authenticator,
+		deviceTemplateController: controllers.Edgeapi().V1alpha1().DeviceTemplate(),
+		deviceTemplateLister:     controllers.Edgeapi().V1alpha1().DeviceTemplate().Cache(),
 	}
 	server.SchemaTemplates = append(server.SchemaTemplates, schema.Template{
 		Store: store,

@@ -21,21 +21,19 @@ import (
 
 type Store struct {
 	types.Store
-	asl                              accesscontrol.AccessSetLookup
-	client                           dynamic.Interface
-	ctx                              context.Context
-	auth                             auth.Authenticator
-	deviceTemplateController         controller.DeviceTemplateController
-	deviceTemplateRevisionController controller.DeviceTemplateRevisionController
+	asl                      accesscontrol.AccessSetLookup
+	client                   dynamic.Interface
+	ctx                      context.Context
+	auth                     auth.Authenticator
+	deviceTemplateController controller.DeviceTemplateController
+	deviceTemplateLister     controller.DeviceTemplateCache
 }
 
 const (
-	templateRevisionDeviceTypeName = "edgeapi.cattle.io/device-template-revision-device-type"
-	templateRevisionDeviceVersion  = "edgeapi.cattle.io/device-template-revision-device-version"
-	templateRevisionDeviceGroup    = "edgeapi.cattle.io/device-template-revision-device-group"
-	templateRevisionDeviceResource = "edgeapi.cattle.io/device-template-revision-device-resource"
-	templateRevisionOwnerName      = "edgeapi.cattle.io/device-template-revision-owner"
-	templateRevisionReference      = "edgeapi.cattle.io/device-template-revision-reference"
+	templateDeviceTypeName    = "edgeapi.cattle.io/template-device-type"
+	templateDeviceVersionName = "edgeapi.cattle.io/template-device-version"
+	templateOwnerName         = "edgeapi.cattle.io/template-owner"
+	templateRevisionReference = "edgeapi.cattle.io/template-revision-reference"
 )
 
 func (s *Store) Create(apiOp *types.APIRequest, schema *types.APISchema, data types.APIObject) (types.APIObject, error) {
@@ -46,19 +44,19 @@ func (s *Store) Create(apiOp *types.APIRequest, schema *types.APISchema, data ty
 		return data, err
 	}
 
-	if err := ValidateTemplateRequest(&deviceTemplateRevision.Spec); err != nil {
+	if err := validateTemplateRequest(&deviceTemplateRevision.Spec); err != nil {
 		logrus.Errorf("invalid device template revision request, error: %s", err.Error())
 		return data, err
 	}
 
-	if err := ValidTemplateSpec(s.ctx, &deviceTemplateRevision, s.client); err != nil {
-		logrus.Errorf("valid template spec error: %s", err.Error())
+	deviceTemplate, err := s.deviceTemplateController.Get(deviceTemplateRevision.Namespace, deviceTemplateRevision.Spec.DeviceTemplateName, metav1.GetOptions{})
+	if err != nil {
+		logrus.Errorf("device template is not exist, error: %s", err.Error())
 		return data, err
 	}
 
-	deviceTemplate, err := ValidateDeviceTemplateIsExist(s.ctx, &deviceTemplateRevision, s.deviceTemplateController)
-	if err != nil {
-		logrus.Errorf("device template is not exist, error: %s", err.Error())
+	if err := s.validTemplateSpec(&deviceTemplateRevision, deviceTemplate); err != nil {
+		logrus.Errorf("valid template spec error: %s", err.Error())
 		return data, err
 	}
 
@@ -68,13 +66,15 @@ func (s *Store) Create(apiOp *types.APIRequest, schema *types.APISchema, data ty
 		return data, err
 	}
 
+	//deviceTemplateRevision.Labels = deviceTemplateRevision.Spec.Labels
+	//deviceTemplateRevision.Labels[templateRevisionReference] = deviceTemplateRevision.Spec.DeviceTemplateName
+	//deviceTemplateRevision.Labels[templateOwnerName] = user
+
 	deviceTemplateRevision.Labels = map[string]string{
-		templateRevisionDeviceTypeName: deviceTemplate.Spec.DeviceKind,
-		templateRevisionDeviceVersion:  deviceTemplate.Spec.DeviceVersion,
-		templateRevisionDeviceGroup:    deviceTemplate.Spec.DeviceGroup,
-		templateRevisionDeviceResource: deviceTemplate.Spec.DeviceResource,
-		templateRevisionReference:      deviceTemplateRevision.Spec.DeviceTemplateName,
-		templateRevisionOwnerName:      user,
+		templateDeviceTypeName:    deviceTemplate.Spec.DeviceKind,
+		templateDeviceVersionName: deviceTemplate.Spec.DeviceVersion,
+		templateRevisionReference: deviceTemplateRevision.Spec.DeviceTemplateName,
+		templateOwnerName:         user,
 	}
 
 	err = convert.ToObj(deviceTemplateRevision, &data.Object)
@@ -94,28 +94,20 @@ func (s *Store) Update(apiOp *types.APIRequest, schema *types.APISchema, data ty
 		return data, err
 	}
 
-	if err := ValidateTemplateRequest(&deviceTemplateRevision.Spec); err != nil {
+	if err := validateTemplateRequest(&deviceTemplateRevision.Spec); err != nil {
 		logrus.Errorf("invalid device template revision request, error: %s", err.Error())
 		return data, err
 	}
 
-	if err := ValidTemplateSpec(s.ctx, &deviceTemplateRevision, s.client); err != nil {
-		logrus.Errorf("valid template spec error: %s", err.Error())
-		return data, err
-	}
-
-	deviceTemplate, err := ValidateDeviceTemplateIsExist(s.ctx, &deviceTemplateRevision, s.deviceTemplateController)
+	deviceTemplate, err := s.deviceTemplateLister.Get(deviceTemplateRevision.Namespace, deviceTemplateRevision.Spec.DeviceTemplateName)
 	if err != nil {
 		logrus.Errorf("device template is not exist, error: %s", err.Error())
 		return data, err
 	}
 
-	deviceTemplateRevision.Labels = map[string]string{
-		templateRevisionDeviceTypeName: deviceTemplate.Spec.DeviceKind,
-		templateRevisionDeviceVersion:  deviceTemplate.Spec.DeviceVersion,
-		templateRevisionDeviceGroup:    deviceTemplate.Spec.DeviceGroup,
-		templateRevisionDeviceResource: deviceTemplate.Spec.DeviceResource,
-		templateRevisionReference:      deviceTemplateRevision.Spec.DeviceTemplateName,
+	if err := s.validTemplateSpec(&deviceTemplateRevision, deviceTemplate); err != nil {
+		logrus.Errorf("valid template spec error: %s", err.Error())
+		return data, err
 	}
 
 	err = convert.ToObj(deviceTemplateRevision, &data.Object)
@@ -127,7 +119,7 @@ func (s *Store) Update(apiOp *types.APIRequest, schema *types.APISchema, data ty
 	return s.Store.Update(apiOp, schema, data, id)
 }
 
-func ValidateTemplateRequest(spec *v1alpha1.DeviceTemplateRevisionSpec) error {
+func validateTemplateRequest(spec *v1alpha1.DeviceTemplateRevisionSpec) error {
 	if spec.DisplayName == "" {
 		return errors.New("displayName is required of DeviceTemplateRevision")
 	}
@@ -143,22 +135,22 @@ func ValidateTemplateRequest(spec *v1alpha1.DeviceTemplateRevisionSpec) error {
 	return nil
 }
 
-func ValidTemplateSpec(ctx context.Context, obj *v1alpha1.DeviceTemplateRevision, client dynamic.Interface) error {
-	deviceGroup := obj.Labels[templateRevisionDeviceGroup]
-	deviceVersion := obj.Labels[templateRevisionDeviceVersion]
-	deviceResource := obj.Labels[templateRevisionDeviceResource]
-	deviceType := obj.Labels[templateRevisionDeviceTypeName]
+func (s *Store) validTemplateSpec(revision *v1alpha1.DeviceTemplateRevision, deviceTemplate *v1alpha1.DeviceTemplate) error {
+	deviceGroup := deviceTemplate.Spec.DeviceGroup
+	deviceVersion := deviceTemplate.Spec.DeviceVersion
+	deviceResource := deviceTemplate.Spec.DeviceResource
+	deviceKind := deviceTemplate.Spec.DeviceKind
 
 	tempStr := util.GenerateRandomTempKey(7)
 	device := unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": fmt.Sprintf("%s/%s", deviceGroup, deviceVersion),
-			"kind":       deviceType,
+			"kind":       deviceKind,
 			"metadata": map[string]interface{}{
 				"name":      fmt.Sprintf("devicetemplate-%s", tempStr),
-				"namespace": obj.Namespace,
+				"namespace": revision.Namespace,
 			},
-			"spec": obj.Spec.TemplateSpec,
+			"spec": revision.Spec.TemplateSpec,
 		},
 	}
 
@@ -170,19 +162,10 @@ func ValidTemplateSpec(ctx context.Context, obj *v1alpha1.DeviceTemplateRevision
 		Resource: deviceResource,
 	}
 
-	crdClient := client.Resource(resource)
-	if _, err := crdClient.Namespace(obj.Namespace).Create(ctx, &device, opt); err != nil {
+	crdClient := s.client.Resource(resource)
+	if _, err := crdClient.Namespace(revision.Namespace).Create(s.ctx, &device, opt); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func ValidateDeviceTemplateIsExist(ctx context.Context, obj *v1alpha1.DeviceTemplateRevision, controller controller.DeviceTemplateController) (*v1alpha1.DeviceTemplate, error) {
-	deviceTemplate, err := controller.Get(obj.Namespace, obj.Spec.DeviceTemplateName, metav1.GetOptions{})
-	if err != nil {
-		return deviceTemplate, err
-	}
-
-	return deviceTemplate, nil
 }

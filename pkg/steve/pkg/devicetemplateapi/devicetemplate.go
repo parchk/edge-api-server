@@ -4,7 +4,6 @@ import (
 	"context"
 
 	apiAuth "github.com/cnrancher/edge-api-server/pkg/auth"
-	v1 "github.com/cnrancher/edge-api-server/pkg/generated/controllers/edgeapi.cattle.io"
 	"github.com/rancher/steve/pkg/accesscontrol"
 	"github.com/rancher/steve/pkg/auth"
 	"github.com/rancher/steve/pkg/client"
@@ -12,7 +11,6 @@ import (
 	"github.com/rancher/steve/pkg/schemaserver/types"
 	steveserver "github.com/rancher/steve/pkg/server"
 	"github.com/rancher/steve/pkg/server/store/proxy"
-	"github.com/sirupsen/logrus"
 )
 
 type Server struct {
@@ -32,16 +30,11 @@ func (s *Server) Setup(ctx context.Context, server *steveserver.Server) error {
 	s.schemas = server.BaseSchemas
 
 	store := proxy.NewProxyStore(s.cf, s.asl)
-	controllers, err := v1.NewFactoryFromConfig(server.RestConfig)
-	if err != nil {
-		logrus.Fatalf("Error building controllers: %s", err.Error())
-	}
 	store = &Store{
-		Store:              store,
-		asl:                s.asl,
-		ctx:                s.ctx,
-		auth:               s.Authenticator,
-		revisionController: controllers.Edgeapi().V1alpha1().DeviceTemplateRevision(),
+		Store: store,
+		asl:   s.asl,
+		ctx:   s.ctx,
+		auth:  s.Authenticator,
 	}
 	server.SchemaTemplates = append(server.SchemaTemplates, schema.Template{
 		Store: store,

@@ -6,28 +6,23 @@ import (
 
 	"github.com/cnrancher/edge-api-server/pkg/apis/edgeapi.cattle.io/v1alpha1"
 	"github.com/cnrancher/edge-api-server/pkg/auth"
-	devicetemplaterevisioncontroller "github.com/cnrancher/edge-api-server/pkg/generated/controllers/edgeapi.cattle.io/v1alpha1"
 	"github.com/rancher/steve/pkg/accesscontrol"
 	"github.com/rancher/steve/pkg/schemaserver/types"
 	"github.com/rancher/wrangler/pkg/data/convert"
 	"github.com/sirupsen/logrus"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type Store struct {
 	types.Store
-	asl                accesscontrol.AccessSetLookup
-	ctx                context.Context
-	auth               auth.Authenticator
-	revisionController devicetemplaterevisioncontroller.DeviceTemplateRevisionController
+	asl  accesscontrol.AccessSetLookup
+	ctx  context.Context
+	auth auth.Authenticator
 }
 
 const (
-	templateDeviceTypeName = "edgeapi.cattle.io/device-template-type"
-	templateDeviceVersion  = "edgeapi.cattle.io/device-template-device-version"
-	templateDeviceGroup    = "edgeapi.cattle.io/device-template-device-group"
-	templateDeviceResource = "edgeapi.cattle.io/device-template-device-resource"
-	templateOwnerName      = "edgeapi.cattle.io/device-template-owner"
+	templateDeviceTypeName    = "edgeapi.cattle.io/template-device-type"
+	templateDeviceVersionName = "edgeapi.cattle.io/template-device-version"
+	templateOwnerName         = "edgeapi.cattle.io/template-owner"
 )
 
 func (s *Store) Create(apiOp *types.APIRequest, schema *types.APISchema, data types.APIObject) (types.APIObject, error) {
@@ -43,11 +38,6 @@ func (s *Store) Create(apiOp *types.APIRequest, schema *types.APISchema, data ty
 		return data, err
 	}
 
-	if err := ValidTemplateRevisionIsExist(s.ctx, &deviceTemplate, s.revisionController); err != nil {
-		logrus.Errorf("device template revision is not exist error: %s", err.Error())
-		return data, err
-	}
-
 	authed, user, err := s.auth.Authenticate(apiOp.Request)
 	if !authed || err != nil {
 		logrus.Error("Invalid user error:", err.Error())
@@ -55,11 +45,9 @@ func (s *Store) Create(apiOp *types.APIRequest, schema *types.APISchema, data ty
 	}
 
 	deviceTemplate.Labels = map[string]string{
-		templateDeviceTypeName: deviceTemplate.Spec.DeviceKind,
-		templateDeviceVersion:  deviceTemplate.Spec.DeviceVersion,
-		templateDeviceGroup:    deviceTemplate.Spec.DeviceGroup,
-		templateDeviceResource: deviceTemplate.Spec.DeviceResource,
-		templateOwnerName:      user,
+		templateDeviceTypeName:    deviceTemplate.Spec.DeviceKind,
+		templateDeviceVersionName: deviceTemplate.Spec.DeviceVersion,
+		templateOwnerName:         user,
 	}
 
 	err = convert.ToObj(deviceTemplate, &data.Object)
@@ -83,10 +71,6 @@ func (s *Store) Update(apiOp *types.APIRequest, schema *types.APISchema, data ty
 		return data, err
 	}
 
-	if err := ValidTemplateRevisionIsExist(s.ctx, &deviceTemplate, s.revisionController); err != nil {
-		logrus.Errorf("device template revision is not exist error: %s", err.Error())
-		return data, err
-	}
 	return s.Store.Update(apiOp, schema, data, id)
 }
 
@@ -105,17 +89,6 @@ func ValidateTemplateRequest(spec v1alpha1.DeviceTemplateSpec) error {
 	}
 	if spec.DisplayName == "" {
 		return errors.New("displayName is required of DeviceTemplate")
-	}
-	return nil
-}
-
-func ValidTemplateRevisionIsExist(ctx context.Context, obj *v1alpha1.DeviceTemplate, controller devicetemplaterevisioncontroller.DeviceTemplateRevisionController) error {
-	if obj.Spec.DefaultRevisionName == "" {
-		return nil
-	}
-	_, err := controller.Get(obj.Namespace, obj.Spec.DefaultRevisionName, metav1.GetOptions{})
-	if err != nil {
-		return err
 	}
 	return nil
 }

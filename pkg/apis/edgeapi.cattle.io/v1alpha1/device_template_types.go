@@ -16,12 +16,10 @@ type DeviceTemplate struct {
 }
 
 type DeviceTemplateSpec struct {
-	DeviceKind     string            `json:"deviceKind,omitempty"`
-	DeviceVersion  string            `json:"deviceVersion,omitempty"`
-	DeviceGroup    string            `json:"deviceGroup,omitempty"`
-	DeviceResource string            `json:"deviceResource,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
-
+	DeviceKind          string `json:"deviceKind,omitempty"`
+	DeviceVersion       string `json:"deviceVersion,omitempty"`
+	DeviceGroup         string `json:"deviceGroup,omitempty"`
+	DeviceResource      string `json:"deviceResource,omitempty"`
 	DisplayName         string `json:"displayName"`
 	Description         string `json:"description"`
 	DefaultRevisionName string `json:"defaultRevisionName"`
